@@ -14,7 +14,7 @@ class Admin(object):
     This is the entry point for admin-related operations on a Stardog server.
 
     See Also:
-      https://www.stardog.com/docs/#_administering_stardog
+      https://docs.stardog.com/operating-stardog/
     """
 
     def __init__(self, endpoint=None, username=None, password=None, auth=None):
@@ -142,7 +142,7 @@ class Admin(object):
                               name="db2", force=True)
 
         See Also:
-          https://www.stardog.com/docs/#_restore_a_database_from_a_backup
+          https://docs.stardog.com/operating-stardog/database-administration/backup-and-restore
         """
         params = {
             'from': from_path,
@@ -381,7 +381,7 @@ class Database(object):
     """Database Admin
 
     See Also:
-      https://www.stardog.com/docs/#_database_admin
+      https://docs.stardog.com/operating-stardog/database-administration/
     """
 
     def __init__(self, name, client):
@@ -453,7 +453,7 @@ class Database(object):
             the backup
 
         See Also:
-          https://www.stardog.com/docs/#_backup_a_database
+          https://docs.stardog.com/operating-stardog/database-administration/backup-and-restore
         """
         params = {'to': to} if to else {}
         self.client.put(self.path + '/backup', params=params)
@@ -495,8 +495,7 @@ class StoredQuery(object):
     """Stored Query
 
     See Also:
-        https://www.stardog.com/docs/#_list_stored_queries
-        https://www.stardog.com/docs/#_managing_stored_queries
+      https://docs.stardog.com/operating-stardog/database-administration/stored-queries
     """
 
     def __init__(self, name, client):
@@ -588,7 +587,7 @@ class User(object):
     """User
 
     See Also:
-      https://www.stardog.com/docs/#_security
+      https://docs.stardog.com/operating-stardog/security/
     """
 
     def __init__(self, name, client):
@@ -698,7 +697,7 @@ class User(object):
         """Gets the user permissions.
 
         See Also:
-          https://www.stardog.com/docs/#_permissions
+          https://docs.stardog.com/operating-stardog/security/security-model#permissions
 
         Returns:
           dict: User permissions
@@ -710,7 +709,7 @@ class User(object):
         """Add a permission to the user.
 
         See Also:
-          https://www.stardog.com/docs/#_permissions
+          https://docs.stardog.com/operating-stardog/security/security-model#permissions
 
         Args:
           action (str): Action type (e.g., 'read', 'write')
@@ -733,7 +732,7 @@ class User(object):
         """Removes a permission from the user.
 
         See Also:
-          https://www.stardog.com/docs/#_permissions
+          https://docs.stardog.com/operating-stardog/security/security-model#permissions
 
         Args:
           action (str): Action type (e.g., 'read', 'write')
@@ -770,7 +769,7 @@ class Role(object):
     """Role
 
     See Also:
-        https://www.stardog.com/docs/#_security
+      https://docs.stardog.com/operating-stardog/security/managing-users-and-roles
     """
 
     def __init__(self, name, client):
@@ -813,7 +812,7 @@ class Role(object):
         """Gets the role permissions.
 
         See Also:
-            https://www.stardog.com/docs/#_permissions
+          https://docs.stardog.com/operating-stardog/security/security-model#permissions
 
         Returns:
           dict: Role permissions
@@ -825,7 +824,7 @@ class Role(object):
         """Adds a permission to the role.
 
         See Also:
-            https://www.stardog.com/docs/#_permissions
+          https://docs.stardog.com/operating-stardog/security/security-model#permissions
 
         Args:
           action (str): Action type (e.g., 'read', 'write')
@@ -849,7 +848,7 @@ class Role(object):
         """Removes a permission from the role.
 
         See Also:
-            https://www.stardog.com/docs/#_permissions
+          https://docs.stardog.com/operating-stardog/security/security-model#permissions
 
         Args:
           action (str): Action type (e.g., 'read', 'write')
@@ -877,7 +876,7 @@ class VirtualGraph(object):
     """Virtual Graph
 
     See Also:
-        https://www.stardog.com/docs/#_structured_data
+      https://docs.stardog.com/virtual-graphs/
     """
 
     def __init__(self, name, client):

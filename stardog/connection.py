@@ -504,7 +504,7 @@ class Docs(object):
     """BITES: Document Storage.
 
     See Also:
-      https://www.stardog.com/docs/#_unstructured_data
+      https://docs.stardog.com/unstructured-content/
     """
 
     def __init__(self, client):
@@ -589,7 +589,7 @@ class ICV(object):
     """Integrity Constraint Validation.
 
     See Also:
-      https://www.stardog.com/docs/#_validating_constraints
+      https://docs.stardog.com/data-quality-constraints/
     """
 
     def __init__(self, conn):
@@ -737,8 +737,7 @@ class GraphQL(object):
     """GraphQL
 
     See Also:
-        https://www.stardog.com/docs/#_graphql_queries
-
+      https://docs.stardog.com/query-stardog/graphql
     """
 
     def __init__(self, conn):
