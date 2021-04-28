@@ -6,7 +6,7 @@ import distutils.util
 
 from . import content_types as content_types
 from . import exceptions as exceptions
-from .http import connection as http_connection
+from .http import client
 
 
 class Connection(object):
@@ -16,7 +16,7 @@ class Connection(object):
     Stardog database
     """
 
-    def __init__(self, database, endpoint=None, username=None, password=None):
+    def __init__(self, database, endpoint=None, username=None, password=None, auth=None):
         """Initializes a connection to a Stardog database.
 
         Args:
@@ -25,13 +25,14 @@ class Connection(object):
             Defaults to `http://localhost:5820`
           username (str, optional): Username to use in the connection
           password (str, optional): Password to use in the connection
+          auth (requests.auth.AuthBase, optional): requests Authentication object.
+            Defaults to `None`
 
         Examples:
           >>> conn = Connection('db', endpoint='http://localhost:9999',
                                 username='admin', password='admin')
         """
-        self.conn = http_connection.Connection(database, endpoint, username,
-                                               password)
+        self.client = client.Client(endpoint, database, username, password, auth=auth)
         self.transaction = None
 
     def docs(self):
@@ -40,7 +41,7 @@ class Connection(object):
         Returns:
           Docs: A Docs object
         """
-        return Docs(self)
+        return Docs(self.client)
 
     def icv(self):
         """Makes an integrity constraint validation object.
@@ -74,7 +75,8 @@ class Connection(object):
               If already in a transaction
         """
         self._assert_not_in_transaction()
-        self.transaction = self.conn.begin(**kwargs)
+        r = self.client.post('/transaction/begin', params=kwargs)
+        self.transaction = r.text
         return self.transaction
 
     def rollback(self):
@@ -86,7 +88,7 @@ class Connection(object):
 
         """
         self._assert_in_transaction()
-        self.conn.rollback(self.transaction)
+        self.client.post('/transaction/rollback/{}'.format(self.transaction))
         self.transaction = None
 
     def commit(self):
@@ -97,7 +99,7 @@ class Connection(object):
             If currently not in a transaction
         """
         self._assert_in_transaction()
-        self.conn.commit(self.transaction)
+        self.client.post('/transaction/commit/{}'.format(self.transaction))
         self.transaction = None
 
     def add(self, content, graph_uri=None):
@@ -117,8 +119,14 @@ class Connection(object):
         self._assert_in_transaction()
 
         with content.data() as data:
-            self.conn.add(self.transaction, data, content.content_type,
-                          content.content_encoding, graph_uri)
+            self.client.post(
+                '/{}/add'.format(self.transaction),
+                params={'graph-uri': graph_uri},
+                headers={
+                    'Content-Type': content.content_type,
+                    'Content-Encoding': content.content_encoding
+                },
+                data=data)
 
     def remove(self, content, graph_uri=None):
         """Removes data from the database.
@@ -138,8 +146,14 @@ class Connection(object):
         self._assert_in_transaction()
 
         with content.data() as data:
-            self.conn.remove(self.transaction, data, content.content_type,
-                             content.content_encoding, graph_uri)
+            self.client.post(
+                '/{}/remove'.format(self.transaction),
+                params={'graph-uri': graph_uri},
+                headers={
+                    'Content-Type': content.content_type,
+                    'Content-Encoding': content.content_encoding
+                },
+                data=data)
 
     def clear(self, graph_uri=None):
         """Removes all data from the database or specific named graph.
@@ -161,7 +175,10 @@ class Connection(object):
           >>> conn.clear()
         """
         self._assert_in_transaction()
-        self.conn.clear(self.transaction, graph_uri)
+        self.client.post(
+            '/{}/clear'.format(self.transaction),
+            params={'graph-uri': graph_uri}
+        )
 
     def size(self, exact=False):
         """Database size.
@@ -172,12 +189,14 @@ class Connection(object):
         Returns:
           int: The number of elements in database
         """
-        return self.conn.size(exact=exact)
+        r = self.client.get('/size', params={'exact': exact})
+        return int(r.text)
 
     def export(self,
                content_type=content_types.TURTLE,
                stream=False,
-               chunk_size=10240):
+               chunk_size=10240,
+               graph_uri=None):
         """Exports the contents of the database.
 
         Args:
@@ -185,6 +204,7 @@ class Connection(object):
           stream (bool): Chunk results? Defaults to False
           chunk_size (int): Number of bytes to read per chunk when streaming.
             Defaults to 10240
+          graph_uri (str, optional): Named graph to export
 
         Returns:
           str: If stream = False
@@ -202,7 +222,14 @@ class Connection(object):
           >>> with conn.export(stream=True) as stream:
                 contents = ''.join(stream)
         """
-        db = self.conn.export(content_type, stream, chunk_size)
+        def _export():
+            with self.client.get(
+                    '/export', headers={'Accept': content_type},
+                    params={'graph-uri': graph_uri},
+                    stream=stream) as r:
+                yield r.iter_content(
+                    chunk_size=chunk_size) if stream else r.content
+        db = _export()
         return _nextcontext(db) if stream else next(db)
 
     def explain(self, query, base_uri=None):
@@ -215,7 +242,45 @@ class Connection(object):
         Returns:
          str: Query explanation
         """
-        return self.conn.explain(query, base_uri)
+        params = {'query': query, 'baseURI': base_uri}
+
+        r = self.client.post(
+            '/explain',
+            data=params,
+        )
+
+        return r.text
+
+    def __query(self,
+                query,
+                method,
+                content_type=None,
+                **kwargs):
+        txId = self.transaction
+        params = {
+            'query': query,
+            'baseURI': kwargs.get('base_uri'),
+            'limit': kwargs.get('limit'),
+            'offset': kwargs.get('offset'),
+            'timeout': kwargs.get('timeout'),
+            'reasoning': kwargs.get('reasoning')
+        }
+
+        # query bindings
+        bindings = kwargs.get('bindings', {})
+        for k, v in bindings.items():
+            params['${}'.format(k)] = v
+
+        url = '/{}/{}'.format(txId, method) if txId else '/{}'.format(method)
+
+        r = self.client.post(
+            url,
+            data=params,
+            headers={'Accept': content_type},
+        )
+
+        return r.json(
+        ) if content_type == content_types.SPARQL_JSON else r.content
 
     def select(self, query, content_type=content_types.SPARQL_JSON, **kwargs):
         """Executes a SPARQL select query.
@@ -247,8 +312,7 @@ class Connection(object):
 
           >>> conn.select('select * {?s ?p ?o}', bindings={'o': '<urn:a>'})
         """
-        return self.conn.query(
-            query, self.transaction, content_type=content_type, **kwargs)
+        return self.__query(query, 'query', content_type=content_type, **kwargs)
 
     def graph(self, query, content_type=content_types.TURTLE, **kwargs):
         """Executes a SPARQL graph query.
@@ -278,7 +342,7 @@ class Connection(object):
           >>> conn.graph('construct {?s ?p ?o} where {?s ?p ?o}',
                          bindings={'o': '<urn:a>'})
         """
-        return self.conn.query(query, self.transaction, content_type, **kwargs)
+        return self.__query(query, 'query', content_type, **kwargs)
 
     def paths(self, query, content_type=content_types.SPARQL_JSON, **kwargs):
         """Executes a SPARQL paths query.
@@ -306,7 +370,7 @@ class Connection(object):
           >>> conn.paths('paths start ?x = :subj end ?y = :obj via ?p',
                          reasoning=True)
         """
-        return self.conn.query(query, self.transaction, content_type, **kwargs)
+        return self.__query(query, 'query', content_type, **kwargs)
 
     def ask(self, query, **kwargs):
         """Executes a SPARQL ask query.
@@ -328,8 +392,7 @@ class Connection(object):
         Examples:
           >>> conn.ask('ask {:subj :pred :obj}', reasoning=True)
         """
-        r = self.conn.query(query, self.transaction, content_types.BOOLEAN,
-                            **kwargs)
+        r = self.__query(query, 'query', content_types.BOOLEAN, **kwargs)
         return bool(distutils.util.strtobool(r.decode()))
 
     def update(self, query, **kwargs):
@@ -349,7 +412,7 @@ class Connection(object):
         Examples:
           >>> conn.update('delete where {?s ?p ?o}')
         """
-        self.conn.update(query, self.transaction, **kwargs)
+        self.__query(query, 'update', None, **kwargs)
 
     def is_consistent(self, graph_uri=None):
         """Checks if the database or named graph is consistent wrt its schema.
@@ -361,7 +424,12 @@ class Connection(object):
         Returns:
           bool: Database consistency state
         """
-        return self.conn.is_consistent(graph_uri)
+        r = self.client.get(
+            '/reasoning/consistency',
+            params={'graph-uri': graph_uri},
+        )
+
+        return bool(distutils.util.strtobool(r.text))
 
     def explain_inference(self, content):
         """Explains the given inference results.
@@ -375,10 +443,21 @@ class Connection(object):
         Examples:
           >>> conn.explain_inference(File('inferences.ttl'))
         """
+        txId = self.transaction
+
         with content.data() as data:
-            return self.conn.explain_inference(data, content.content_type,
-                                               content.content_encoding,
-                                               self.transaction)
+            url = '/reasoning/{}/explain'.format(txId) if txId else '/reasoning/explain'
+
+            r = self.client.post(
+                url,
+                data=data,
+                headers={
+                    'Content-Type': content.content_type,
+                    'Content-Encoding': content.content_encoding
+                },
+            )
+
+            return r.json()['proofs']
 
     def explain_inconsistency(self, graph_uri=None):
         """Explains why the database or a named graph is inconsistent.
@@ -390,8 +469,16 @@ class Connection(object):
         Returns:
           dict: Explanation results
         """
-        return self.conn.explain_inconsistency(self.transaction,
-                                               self.graph_uri)
+        txId = self.transaction
+        url = '/reasoning/{}/explain/inconsistency'.format(
+            txId) if txId else '/reasoning/explain/inconsistency'
+
+        r = self.client.get(
+            url,
+            params={'graph-uri': graph_uri},
+        )
+
+        return r.json()['proofs']
 
     def _assert_not_in_transaction(self):
         if self.transaction:
@@ -401,11 +488,16 @@ class Connection(object):
         if not self.transaction:
             raise exceptions.TransactionException('Not in a transaction')
 
+    def close(self):
+        """Close the underlying HTTP connection.
+        """
+        self.client.close()
+
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
-        self.conn.__exit__(*args)
+        self.close()
 
 
 class Docs(object):
@@ -415,13 +507,13 @@ class Docs(object):
       https://www.stardog.com/docs/#_unstructured_data
     """
 
-    def __init__(self, conn):
+    def __init__(self, client):
         """Initializes a Docs.
 
         Use :meth:`stardog.connection.Connection.docs`
         instead of constructing manually.
         """
-        self.docs = conn.conn.docs()
+        self.client = client
 
     def size(self):
         """Calculates document store size.
@@ -429,7 +521,8 @@ class Docs(object):
         Returns:
           int: Number of documents in the store
         """
-        return self.docs.size()
+        r = self.client.get('/docs/size')
+        return int(r.text)
 
     def add(self, name, content):
         """Adds a document to the store.
@@ -442,12 +535,12 @@ class Docs(object):
           >>> docs.add('example', File('example.pdf'))
         """
         with content.data() as data:
-            self.docs.add(name, data)
+            self.client.post('/docs', files={'upload': (name, data)})
 
     def clear(self):
         """Removes all documents from the store.
         """
-        self.docs.clear()
+        self.client.delete('/docs')
 
     def get(self, name, stream=False, chunk_size=10240):
         """Gets a document from the store.
@@ -475,7 +568,12 @@ class Docs(object):
           >>> with docs.get('example', stream=True) as stream:
                             contents = ''.join(stream)
         """
-        doc = self.docs.get(name, stream, chunk_size)
+        def _get():
+            with self.client.get('/docs/{}'.format(name), stream=stream) as r:
+                yield r.iter_content(
+                    chunk_size=chunk_size) if stream else r.content
+
+        doc = _get()
         return _nextcontext(doc) if stream else next(doc)
 
     def delete(self, name):
@@ -484,7 +582,7 @@ class Docs(object):
         Args:
           name (str): Name of the document
         """
-        self.docs.delete(name)
+        self.client.delete('/docs/{}'.format(name))
 
 
 class ICV(object):
@@ -501,7 +599,7 @@ class ICV(object):
         instead of constructing manually.
         """
         self.conn = conn
-        self.icv = conn.conn.icv()
+        self.client = conn.client
 
     def add(self, content):
         """Adds integrity constraints to the database.
@@ -513,7 +611,14 @@ class ICV(object):
           >>> icv.add(File('constraints.ttl'))
         """
         with content.data() as data:
-            self.icv.add(data, content.content_type, content.content_encoding)
+            self.client.post(
+                '/icv/add',
+                data=data,
+                headers={
+                    'Content-Type': content.content_type,
+                    'Content-Encoding': content.content_encoding
+                },
+            )
 
     def remove(self, content):
         """Removes integrity constraints from the database.
@@ -525,13 +630,19 @@ class ICV(object):
           >>> icv.remove(File('constraints.ttl'))
         """
         with content.data() as data:
-            self.icv.remove(data, content.content_type,
-                            content.content_encoding)
+            self.client.post(
+                '/icv/remove',
+                data=data,
+                headers={
+                    'Content-Type': content.content_type,
+                    'Content-Encoding': content.content_encoding
+                },
+            )
 
     def clear(self):
         """Removes all integrity constraints from the database.
         """
-        self.icv.clear()
+        self.client.post('/icv/clear')
 
     def is_valid(self, content, graph_uri=None):
         """Checks if given integrity constraints are valid.
@@ -546,10 +657,21 @@ class ICV(object):
         Examples:
           >>> icv.is_valid(File('constraints.ttl'), graph_uri='urn:graph')
         """
+        transaction = self.conn.transaction
+        url = 'icv/{}/validate'.format(
+            transaction) if transaction else '/icv/validate'
         with content.data() as data:
-            return self.icv.is_valid(data, content.content_type,
-                                     content.content_encoding,
-                                     self.conn.transaction, graph_uri)
+            r = self.client.post(
+                url,
+                data=data,
+                headers={
+                    'Content-Type': content.content_type,
+                    'Content-Encoding': content.content_encoding
+                },
+                params={'graph-uri': graph_uri},
+            )
+
+            return bool(distutils.util.strtobool(r.text))
 
     def explain_violations(self, content, graph_uri=None):
         """Explains violations of the given integrity constraints.
@@ -566,11 +688,22 @@ class ICV(object):
           >>> icv.explain_violations(File('constraints.ttl'),
                                      graph_uri='urn:graph')
         """
+        transaction = self.conn.transaction
+        url = '/icv/{}/violations'.format(
+            transaction) if transaction else '/icv/violations'
 
         with content.data() as data:
-            return self.icv.explain_violations(
-                data, content.content_type, content.content_encoding,
-                self.conn.transaction, graph_uri)
+            r = self.client.post(
+                url,
+                data=data,
+                headers={
+                    'Content-Type': content.content_type,
+                    'Content-Encoding': content.content_encoding
+                },
+                params={'graph-uri': graph_uri},
+            )
+
+            return self.client._multipart(r)
 
     def convert(self, content, graph_uri=None):
         """Converts given integrity constraints to a SPARQL query.
@@ -587,8 +720,17 @@ class ICV(object):
           >>> icv.convert(File('constraints.ttl'), graph_uri='urn:graph')
         """
         with content.data() as data:
-            return self.icv.convert(data, content.content_type,
-                                    content.content_encoding, graph_uri)
+            r = self.client.post(
+                '/icv/convert',
+                data=data,
+                headers={
+                    'Content-Type': content.content_type,
+                    'Content-Encoding': content.content_encoding
+                },
+                params={'graph-uri': graph_uri},
+            )
+
+            return r.text
 
 
 class GraphQL(object):
@@ -605,8 +747,8 @@ class GraphQL(object):
         Use :meth:`stardog.connection.Connection.graphql`
         instead of constructing manually.
         """
-        self.gql = conn.conn.graphql()
         self.conn = conn
+        self.client = conn.client
 
     def query(self, query, variables=None):
         """Executes a GraphQL query.
@@ -633,7 +775,19 @@ class GraphQL(object):
                 variables={'id': 1000})
 
         """
-        return self.gql.query(query, variables)
+        r = self.client.post(
+            '/graphql',
+            json={
+                'query': query,
+                'variables': variables if variables else {}
+            })
+
+        res = r.json()
+        if 'data' in res:
+            return res['data']
+
+        # graphql endpoint returns valid response with errors
+        raise exceptions.StardogException(res)
 
     def schemas(self):
         """Retrieves all available schemas.
@@ -641,12 +795,13 @@ class GraphQL(object):
         Returns:
           dict: All schemas
         """
-        return self.gql.schemas()
+        r = self.client.get('/graphql/schemas')
+        return r.json()['schemas']
 
     def clear_schemas(self):
         """Deletes all schemas.
         """
-        self.gql.clear_schemas()
+        self.client.delete('/graphql/schemas')
 
     def add_schema(self, name, content):
         """Adds a schema to the database.
@@ -659,7 +814,7 @@ class GraphQL(object):
           >>> gql.add_schema('people', content=File('people.graphql'))
         """
         with content.data() as data:
-            self.gql.add_schema(name, data)
+            self.client.put('/graphql/schemas/{}'.format(name), data=data)
 
     def schema(self, name):
         """Gets schema information.
@@ -670,7 +825,8 @@ class GraphQL(object):
         Returns:
           dict: GraphQL schema
         """
-        return self.gql.schema(name)
+        r = self.client.get('/graphql/schemas/{}'.format(name))
+        return r.text
 
     def remove_schema(self, name):
         """Removes a schema from the database.
@@ -678,7 +834,7 @@ class GraphQL(object):
         Args:
           name (str): Name of the schema
         """
-        return self.gql.remove_schema(name)
+        self.client.delete('/graphql/schemas/{}'.format(name))
 
 
 @contextlib.contextmanager

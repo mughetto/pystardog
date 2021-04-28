@@ -4,6 +4,7 @@ import stardog.admin
 import stardog.connection as connection
 import stardog.content as content
 import stardog.content_types as content_types
+import stardog.exceptions as exceptions
 
 
 @pytest.fixture(scope="module")
@@ -12,27 +13,21 @@ def conn():
         yield conn
 
 
-@pytest.fixture(scope="module")
-def admin():
+@pytest.fixture(scope="module", autouse="True")
+def db():
     with stardog.admin.Admin() as admin:
-
-        for db in admin.databases():
-            db.drop()
-
-        admin.new_database('newtest', {
-            'search.enabled': True
-        })
-
+        db = admin.new_database('newtest', {'search.enabled': True})
         yield admin
+        db.drop()
 
 
-def test_transactions(conn, admin):
-    data = '<urn:subj> <urn:pred> <urn:obj> .'
+def test_transactions(conn):
+    data = content.Raw('<urn:subj> <urn:pred> <urn:obj> .', content_types.TURTLE)
 
     # add
     conn.begin()
     conn.clear()
-    conn.add(content.Raw(data, content_types.TURTLE))
+    conn.add(data)
     conn.commit()
 
     assert conn.size() == 1
@@ -46,7 +41,7 @@ def test_transactions(conn, admin):
 
     # rollback
     conn.begin()
-    conn.add(content.Raw(data, content_types.TURTLE))
+    conn.add(data)
     conn.rollback()
 
     assert conn.size() == 0
@@ -71,8 +66,49 @@ def test_transactions(conn, admin):
 
     assert conn.size() == 0
 
+    # add named graph
+    conn.begin()
+    conn.add(data, graph_uri='urn:graph')
+    conn.commit()
 
-def test_queries(conn, admin):
+    assert conn.size(exact=True) == 1
+
+    # remove from default graph
+    conn.begin()
+    conn.remove(data)
+    conn.commit()
+
+    assert conn.size(exact=True) == 1
+
+    # remove from named graph
+    conn.begin()
+    conn.remove(data, graph_uri='urn:graph')
+    conn.commit()
+
+    assert conn.size(exact=True) == 0
+
+
+def test_export(conn):
+    conn.begin()
+    # add to default graph
+    conn.add(content.Raw('<urn:default_subj> <urn:default_pred> <urn:default_obj> .'))
+    # add to a named graph
+    conn.add(
+        content.Raw('<urn:named_subj> <urn:named_pred> <urn:named_obj> .'),
+        '<urn:named_graph>'
+    )
+    conn.commit()
+
+    default_export = conn.export()
+    named_export = conn.export(graph_uri='<urn:named_graph>')
+
+    assert b'default_obj' in default_export
+    assert b'named_obj' not in default_export
+    assert b'named_obj' in named_export
+    assert b'default_obj' not in named_export
+
+
+def test_queries(conn):
     # add
     conn.begin()
     conn.clear()
@@ -160,7 +196,50 @@ def test_queries(conn, admin):
     conn.commit()
 
 
-def test_docs(conn, admin):
+@pytest.mark.skip(reason="Bug introduced in reasoning, it's being tracked here: https://stardog.atlassian.net/browse/PLAT-2027")
+def test_reasoning(conn):
+    data = content.Raw(
+        b'<urn:subj> <urn:pred> <urn:obj> , <urn:obj2> .',
+        content_types.TURTLE
+    )
+
+    # add
+    conn.begin()
+    conn.add(data)
+    conn.commit()
+
+    # consistency
+    assert conn.is_consistent()
+
+    # explain inference
+    r = conn.explain_inference(
+        content.Raw('<urn:subj> <urn:pred> <urn:obj> .', content_types.TURTLE)
+    )
+    assert ('status', 'ASSERTED') in r[0].items()
+
+    # explain inference in transaction
+    conn.begin()
+    conn.add(content.Raw('<urn:subj> <urn:pred> <urn:obj3> .', content_types.TURTLE))
+
+    with pytest.raises(exceptions.StardogException):
+        r = conn.explain_inference(
+            content.Raw('<urn:subj> <urn:pred> <urn:obj3> .', content_types.TURTLE)
+        )
+        assert len(r) == 0
+
+    # explain inconsistency in transaction
+    with pytest.raises(exceptions.StardogException):
+        r = conn.explain_inconsistency()
+        assert len(r) == 0
+
+    conn.rollback()
+
+    # explain inconsistency
+    r = conn.explain_inconsistency()
+    assert len(r) == 0
+
+
+def test_docs(conn):
     example = (b'Only the Knowledge Graph can unify all data types and '
                b'every data velocity into a single, coherent, unified whole.')
 
@@ -190,7 +269,7 @@ def test_docs(conn, admin):
     assert docs.size() == 0
 
 
-def test_icv(conn, admin):
+def test_icv(conn):
 
     conn.begin()
     conn.clear()
@@ -210,10 +289,41 @@ def test_icv(conn, admin):
     icv.remove(constraints)
     icv.clear()
 
+    constraint = content.Raw(
+        ':Manager rdfs:subClassOf :Employee .',
+        content_types.TURTLE
+    )
 
-def test_graphql(conn, admin):
+    # add/remove/clear
+    icv.add(constraint)
+    icv.remove(constraint)
+    icv.clear()
 
-    db = admin.new_database('graphql', {},
+    # nothing in the db yet so it should be valid
+    assert icv.is_valid(constraint)
+
+    # insert a triple that violates the constraint
+    conn.begin()
+    conn.add(content.Raw(':Alice a :Manager .', content_types.TURTLE))
+    conn.commit()
+
+    assert not icv.is_valid(constraint)
+
+    assert len(icv.explain_violations(constraint)) == 2
+
+    # make Alice an employee so the constraint is satisfied
+    conn.begin()
+    conn.add(content.Raw(':Alice a :Employee .', content_types.TURTLE))
+    conn.commit()
+
+    assert icv.is_valid(constraint)
+
+    assert 'SELECT DISTINCT' in icv.convert(constraint)
+
+
+def test_graphql():
+    with stardog.admin.Admin() as admin:
+        db = admin.new_database('graphql', {},
                             content.File('test/data/starwars.ttl'))
 
     with connection.Connection(
