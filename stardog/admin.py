@@ -306,38 +306,32 @@ class Admin(object):
         self.client.delete('/admin/queries/stored')
 
 
-    #TODO
-    # def new_stored_function(self):
-    #     """
-    #     Adds Stored Function
-    #     https://stardog-union.github.io/http-docs/#operation/addStoredFunction
-    #     :return:
-    #     """
+    def new_stored_function(self, function):
+        """
+        Adds Stored Function
+        https://stardog-union.github.io/http-docs/#operation/addStoredFunction
+        :return:
+        """
 
-    #TODO
-    # def stored_function(self):
-    #     """
-    #     Get Stored function
-    #     https://stardog-union.github.io/http-docs/#operation/getStoredFunction
-    #     :return:
-    #     """
+        self.client.post('admin/functions/stored')
+        return StoredFunction(name, self.client, meta=function)
 
-    #TODO
-    # def stored_functions(self):
-    #     """
-    #     Retrieve all stored functions on the server, or optionally just the function specified in the query string parameter
-    #     https://stardog-union.github.io/http-docs/#operation/exportStoredFunctions
-    #     :return:
-    #     """
+    def stored_function(self, name):
+        """
+        Get Stored function with name name
+        :return:
+        """
+        self.client.get('admin/functions/stored')
 
-    #TODO: Note this can delete all, or a specific stored function passed as a paramter.
-    #  We might need to discuss if we are going to support both methods separatly, or depending if no param is passed, then delete all stored functions.
-    # def delete_stored_functions(self):
-    #     """
-    #     Delete all stored functions on the server, or optionally just the function specified in the query string parameter
-    #     https://stardog-union.github.io/http-docs/#operation/deleteStoredFunction
-    #     :return:
-    #     """
+
+    def stored_functions(self):
+        """
+        Retrieve all stored functions on the server, or optionally just the function specified in the query string parameter
+        https://stardog-union.github.io/http-docs/#operation/exportStoredFunctions
+        :return:
+        """
+        self.client.get('admin/functions/stored')
+
 
     def user(self, name):
         """Retrieves an object representing a user.
@@ -1692,18 +1686,18 @@ class DataSource(object):
 # We could get rid of this class, and the delete method here as admin.delete_stored_functions() can take a single stored function
 # and mimic this behaviour. This is intentionally put here in case more methods are added to StoredFunctions
 # in the future.
-# class StoredFunction(object):
-#     def init(self):
-#         """
-#         Initializes an StoredFunction
-#         :return:
-#         """
-#     def delete(self):
-#         """
-#         Delete the stored function specified in the query string parameter
-#         https://stardog-union.github.io/http-docs/#operation/deleteStoredFunctionNamed
-#         :return:
-#        """
+class StoredFunction(object):
+    def init(self):
+        """
+        Initializes an StoredFunction
+        :return:
+        """
+    def delete(self):
+        """
+        Delete the stored function specified in the query string parameter
+        https://stardog-union.github.io/http-docs/#operation/deleteStoredFunctionNamed
+        :return:
+       """
 
 class Cache(object):
     """Cached data

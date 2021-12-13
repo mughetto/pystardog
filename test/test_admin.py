@@ -787,3 +787,14 @@ def test_add_and_delete_namespaces(admin):
         db.remove_namespace("non-existent-ns")
 
     db.drop()
+
+def test_stored_function(admin):
+    assert admin.stored_functions() == 0
+    admin.new_stored_function(
+        "prefix ex: <http://example/> \
+        function ex:permutation(?n, ?r) { factorial(?n) / factorial(?n - ?r) } \
+        function <http://example/combination>(?n, ?r) { permutation(?n, ?r) / factorial(?r) }"
+    )
+    assert admin.stored_functions() == 2
+
+    admin.stored_function()
