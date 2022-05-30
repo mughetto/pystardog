@@ -46,7 +46,7 @@ class Client(object):
             )
         self.session.auth = auth
         
-        session.verify = False
+        self.session.verify = False
 
     def post(self, path, **kwargs):
         return self.__wrap(self.session.post(self.url + path, **kwargs))
