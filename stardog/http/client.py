@@ -49,7 +49,7 @@ class Client(object):
         self.session.verify = False
 
     def post(self, path, **kwargs):
-        return self.__wrap(self.session.post(self.url + path, **kwargs))
+        return self.__wrap(self.session.post(self.url + path, verify=False,**kwargs))
 
     def put(self, path, **kwargs):
         return self.__wrap(self.session.put(self.url + path, **kwargs))
